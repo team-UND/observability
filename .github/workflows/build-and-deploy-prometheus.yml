@@ -1,0 +1,63 @@
+name: Build and Deploy Prometheus
+
+on:
+  push:
+    branches: main
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: beforegoing-prometheus
+  S3_BUCKET_NAME: codedeploy-artifact-prometheus-beforegoingdapne2
+  APPLICATION_NAME: codedeploy-app-prometheus-beforegoingdapne2
+  DEPLOYMENT_GROUP_NAME: codedeploy-group-prometheus-beforegoingdapne2
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: prometheus
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+    - name: Create deployment package
+      run: |
+        zip -r ../deployment-${{ github.sha }}.zip .
+
+    - name: Upload deployment package to S3
+      run: |
+        aws s3 cp ../deployment-${{ github.sha }}.zip s3://$S3_BUCKET_NAME/deployment-${{ github.sha }}.zip
+
+    - name: Create CodeDeploy deployment
+      run: |
+        aws deploy create-deployment \
+          --application-name $APPLICATION_NAME \
+          --deployment-group-name $DEPLOYMENT_GROUP_NAME \
+          --description "Deployment from GitHub Actions - commit ${{ github.sha }}" \
+          --s3-location bucket=$S3_BUCKET_NAME,key=deployment-${{ github.sha }}.zip,bundleType=zip

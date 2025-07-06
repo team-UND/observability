@@ -13,8 +13,6 @@ scrape_configs:
     ec2_sd_configs:
       - region: ap-northeast-2
         port: 80
-        access_key:
-        secret_key:
         filters:
           - name: tag:Monitoring
             values: 
