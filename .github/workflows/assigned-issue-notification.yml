@@ -1,0 +1,36 @@
+name: Assigned Issue Notification
+
+on:
+  issues:
+    types: [assigned]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord Notification
+        uses: Ilshidur/action-discord@0.3.2
+        with:
+          args: "이슈가 할당됐어요 🎉"
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_EMBEDS: |
+            [
+              {
+                "title": "${{ github.event.issue.title }}",
+                "color": 10478271,
+                "description": "${{ github.event.issue.html_url }}",
+                "fields": [
+                  {
+                    "name": "Issue Number",
+                    "value": "#${{ github.event.issue.number }}",
+                    "inline": true
+                  },
+                  {
+                    "name": "Assignee",
+                    "value": "@${{ github.event.issue.assignee.login }}",
+                    "inline": true
+                  }
+                ]
+              }
+            ]
