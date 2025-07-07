@@ -45,19 +45,3 @@ jobs:
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-
-    - name: Create deployment package
-      run: |
-        zip -r ../deployment-${{ github.sha }}.zip .
-
-    - name: Upload deployment package to S3
-      run: |
-        aws s3 cp ../deployment-${{ github.sha }}.zip s3://$S3_BUCKET_NAME/deployment-${{ github.sha }}.zip
-
-    - name: Create CodeDeploy deployment
-      run: |
-        aws deploy create-deployment \
-          --application-name $APPLICATION_NAME \
-          --deployment-group-name $DEPLOYMENT_GROUP_NAME \
-          --description "Deployment from GitHub Actions - commit ${{ github.sha }}" \
-          --s3-location bucket=$S3_BUCKET_NAME,key=deployment-${{ github.sha }}.zip,bundleType=zip
