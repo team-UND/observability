@@ -1,5 +1,8 @@
 FROM prom/prometheus:latest
 
+COPY prometheus.yml /etc/prometheus/prometheus.yml
+
 EXPOSE 9090
 
-CMD [ "--config.file=/etc/prometheus/prometheus.yml" ]
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["curl", "-f", "http://localhost:9090/-/healthy"]
