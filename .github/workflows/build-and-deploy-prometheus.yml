@@ -67,12 +67,40 @@ jobs:
         wait-for-service-stability: true
         wait-for-minutes: 8
 
-    - name: Deployment notification
-      if: always()
-      run: |
-        if [ "${{ job.status }}" == "success" ]; then
-          echo "✅ Deployment successful!"
-        else
-          echo "❌ Deployment failed!"
-          exit 1
-        fi
+    - name: Send Success Message
+      if: success()
+      uses: Ilshidur/action-discord@0.3.2
+      with:
+        args: "새로운 버전이 배포되었어요 🚀"
+      env:
+        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        DISCORD_EMBEDS: |
+          [
+            {
+              "author": {
+                  "name": "${{ github.actor }}"
+              },
+              "title": "Deployment Successed",
+              "description": "Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "color": 10478271
+            }
+          ]
+
+    - name: Send Failure Message
+      if: failure()
+      uses: Ilshidur/action-discord@0.3.2
+      with:
+        args: "배포가 실패했어요 😢"
+      env:
+        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        DISCORD_EMBEDS: |
+          [
+            {
+              "author": {
+                  "name": "${{ github.actor }}"
+              },
+              "title": "Deployment Failed",
+              "description": "Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "color": 13458524
+            }
+          ]
