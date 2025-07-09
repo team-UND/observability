@@ -71,7 +71,7 @@ jobs:
       if: success()
       uses: Ilshidur/action-discord@0.3.2
       with:
-        args: "새로운 버전이 배포되었어요 🚀"
+        args: "A new version has been deployed 🚀"
       env:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         DISCORD_EMBEDS: |
@@ -90,7 +90,7 @@ jobs:
       if: failure()
       uses: Ilshidur/action-discord@0.3.2
       with:
-        args: "배포가 실패했어요 😢"
+        args: "There was an error during deployment 😢"
       env:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         DISCORD_EMBEDS: |
