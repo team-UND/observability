@@ -5,14 +5,17 @@ on:
     branches: main
 
 env:
+  AWS_IAM_ROLE_TO_ASSUME: ${{ secrets.AWS_IAM_ROLE_TO_ASSUME }}
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
   ECS_SERVICE: ${{ vars.ECS_SERVICE }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
   ECS_TASK_DEFINITION: ${{ vars.ECS_TASK_DEFINITION }}
   CONTAINER_NAME: ${{ vars.CONTAINER_NAME }}
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
 permissions:
+  id-token: write
   contents: read
 
 jobs:
@@ -26,8 +29,7 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        role-to-assume: ${{ env.AWS_IAM_ROLE_TO_ASSUME }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Login to Amazon ECR
@@ -73,7 +75,7 @@ jobs:
       with:
         args: "A new version has been deployed 🚀"
       env:
-        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        DISCORD_WEBHOOK: ${{ env.DISCORD_WEBHOOK }}
         DISCORD_EMBEDS: |
           [
             {
@@ -92,7 +94,7 @@ jobs:
       with:
         args: "There was an error during deployment 😢"
       env:
-        DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        DISCORD_WEBHOOK: ${{ env.DISCORD_WEBHOOK }}
         DISCORD_EMBEDS: |
           [
             {
