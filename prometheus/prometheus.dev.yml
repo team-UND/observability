@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'spring-boot-server'
+    metrics_path: '/server/actuator/prometheus'
+    scheme: https
+    static_configs:
+      - targets: ['api.beforegoing.store']

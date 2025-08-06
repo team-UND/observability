@@ -1,8 +1,47 @@
+# !!! 서비스 디스커버리 대신 Service Connect 방법 알아보기
+
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'spring-boot-app'
-    metrics_path: '/actuator/prometheus'
+  - job_name: 'prometheus'
     static_configs:
-      - targets: ['localhost:8080']
+      - targets: ['localhost:9090']
+
+  - job_name: 'spring-boot-server'
+    # AWS ECS 서비스 디스커버리 설정을 사용합니다.
+    ecs_sd_configs:
+      - region: ${{ vars.AWS_REGION }} # GitHub Actions 변수를 사용합니다. # TODO: 이 방법이 맞는지 검토 필요
+        # Prometheus 태스크에 연결된 IAM 역할은 서비스 디스커버리를 위해
+        # ecs:ListTasks, ecs:DescribeTasks, ec2:DescribeInstances 권한이 필요합니다.
+
+    # 디스커버리된 타겟을 필터링하고 레이블을 재작성하여 Prometheus가 올바르게 수집하도록 설정합니다.
+    relabel_configs:
+      # 1. "prometheus.io/scrape=true" Docker 레이블이 있는 태스크만 수집 대상으로 유지합니다.
+      #    모니터링할 Spring Boot 앱의 ECS Task Definition에 이 레이블을 추가해야 합니다.
+      - source_labels: [__meta_ecs_task_labels_prometheus_io_scrape]
+        regex: true
+        action: keep
+
+      # 2. 태스크의 Private IP와 "prometheus.io/port" Docker 레이블을 사용하여 수집 주소(__address__)를 설정합니다.
+      #    이렇게 하면 여러 포트가 노출된 태스크에서도 정확한 포트를 타겟팅할 수 있습니다.
+      - source_labels: [__meta_ecs_task_private_ip, __meta_ecs_task_labels_prometheus_io_port]
+        regex: (.+);(.+)
+        target_label: __address__
+        replacement: ${1}:${2}
+
+      # 3. "prometheus.io/path" 레이블 값으로 메트릭 경로를 설정합니다.
+      #    기본값은 /metrics 이지만, Spring Boot Actuator는 /actuator/prometheus를 사용하므로 이 설정이 유용합니다.
+      - source_labels: [__meta_ecs_task_labels_prometheus_io_path]
+        target_label: __metrics_path__
+        regex: (.+)
+
+      # 4. ECS 태스크 정의 패밀리 이름으로 job 레이블을 설정하여 구분하기 쉽게 만듭니다.
+      - source_labels: [__meta_ecs_task_definition_family]
+        target_label: job
+    
+    # TODO: 아래 방법이 맞는지 검토 필요
+    basic_auth:
+      username: ${PROMETHEUS_USERNAME}    # AWS Secrets Manager 등을 통해 동적으로 주입
+      password: ${PROMETHEUS_PASSWORD}
