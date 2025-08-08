@@ -1,4 +1,4 @@
-name: Assigned Issue Notification
+name: Notify Assigned Issue
 
 on:
   issues:
@@ -6,6 +6,9 @@ on:
 
 env:
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+permissions:
+  contents: read
 
 jobs:
   notify:

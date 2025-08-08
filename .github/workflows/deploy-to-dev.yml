@@ -1,0 +1,170 @@
+name: Deploy to Development Server
+
+on:
+  push:
+    branches: [dev]
+
+env:
+  AWS_IAM_ROLE_TO_ASSUME: ${{ secrets.DEV_AWS_IAM_ROLE_TO_ASSUME }}
+  AWS_REGION: ${{ vars.DEV_AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.DEV_ECR_REPOSITORY }}
+  APP_RUNNER_SERVICE_ARN: ${{ vars.DEV_APP_RUNNER_SERVICE_ARN }}
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.build-image.outputs.image }}
+      short_sha: ${{ steps.set-sha.outputs.short_sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set SHORT_SHA
+        id: set-sha
+        run: |
+          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_IAM_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SHORT_SHA: ${{ steps.set-sha.outputs.short_sha }}
+        run: |
+          IMAGE_TAG=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$SHORT_SHA
+          echo "Building and pushing image for development: $IMAGE_TAG"
+          docker build --target dev -t $IMAGE_TAG .
+          docker push $IMAGE_TAG
+          echo "image=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_IAM_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Extract App Runner Service Name
+        id: extract-name
+        run: |
+          SERVICE_NAME=$(echo "${{ env.APP_RUNNER_SERVICE_ARN }}" | cut -d'/' -f2)
+          echo "service_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+
+      - name: Deploy to App Runner and Wait for Completion
+        id: deploy
+        run: |
+          echo "Updating App Runner service to use image: ${{ needs.build.outputs.image_tag }}"
+          UPDATE_OUTPUT=$(aws apprunner update-service \
+            --service-arn ${{ env.APP_RUNNER_SERVICE_ARN }} \
+            --source-configuration '{"ImageRepository": {"ImageIdentifier": "${{ needs.build.outputs.image_tag }}", "ImageRepositoryType": "ECR"}}' \
+            --output json)
+
+          OPERATION_ID=$(echo $UPDATE_OUTPUT | jq -r '.OperationId')
+
+          if [ -z "$OPERATION_ID" ] || [ "$OPERATION_ID" = "null" ]; then
+            echo "::error::Failed to get OperationId from update-service command."
+            echo "AWS CLI output: $UPDATE_OUTPUT"
+            exit 1
+          fi
+
+          echo "Deployment update initiated. Operation ID: $OPERATION_ID"
+          echo "Waiting for service update to complete..."
+
+          MAX_RETRIES=60 # 60 * 10s = 10 minutes timeout
+          FINAL_STATUS=""
+          for i in $(seq 1 $MAX_RETRIES); do
+            OPERATION_STATUS=$(aws apprunner list-operations --service-arn ${{ env.APP_RUNNER_SERVICE_ARN }} --max-results 50 --output json \
+              | jq -r --arg opId "$OPERATION_ID" '.OperationSummaryList[] | select(.Id == $opId) | .Status')
+
+            if [ -z "$OPERATION_STATUS" ]; then
+              echo "Waiting for operation details to become available... ($i/$MAX_RETRIES)"
+            else
+              echo "Current deployment status: $OPERATION_STATUS ($i/$MAX_RETRIES)"
+            fi
+
+            if [ "$OPERATION_STATUS" = "SUCCEEDED" ]; then
+              FINAL_STATUS="SUCCEEDED"
+              break
+            elif [ "$OPERATION_STATUS" = "FAILED" ] || [ "$OPERATION_STATUS" = "ROLLBACK_SUCCEEDED" ] || [ "$OPERATION_STATUS" = "ROLLBACK_FAILED" ]; then
+              FINAL_STATUS=$OPERATION_STATUS
+              break
+            fi
+
+            if [ $i -eq $MAX_RETRIES ]; then
+              FINAL_STATUS="TIMEOUT"
+              break
+            fi
+            sleep 10
+          done
+
+          echo "final_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+          if [ "$FINAL_STATUS" != "SUCCEEDED" ]; then
+            echo "::error::Deployment did not succeed. Final status: $FINAL_STATUS"
+            exit 1
+          fi
+
+      - name: Notify Success to Discord
+        if: success()
+        uses: Ilshidur/action-discord@0.3.2
+        with:
+          args: "A new version (`${{ needs.build.outputs.short_sha }}`) has been deployed to the Development Server 🚀"
+        env:
+          DISCORD_WEBHOOK: ${{ env.DISCORD_WEBHOOK }}
+          DISCORD_EMBEDS: |
+            [
+              {
+                "author": { "name": "${{ github.actor }}" },
+                "title": "Deployment Succeeded",
+                "description": "Branch: `${{ github.ref_name }}`\nWorkflow: [View on GitHub](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})",
+                "color": 10478271,
+                "fields": [
+                  { "name": "Service", "value": "`${{ steps.extract-name.outputs.service_name }}`", "inline": true },
+                  { "name": "Image", "value": "`${{ needs.build.outputs.short_sha }}`", "inline": true }
+                ]
+              }
+            ]
+
+      - name: Notify Failure to Discord
+        if: failure()
+        uses: Ilshidur/action-discord@0.3.2
+        with:
+          args: "Deployment to Development Server failed with status: `${{ steps.deploy.outputs.final_status }}` 😢"
+        env:
+          DISCORD_WEBHOOK: ${{ env.DISCORD_WEBHOOK }}
+          DISCORD_EMBEDS: |
+            [
+              {
+                "author": { "name": "${{ github.actor }}" },
+                "title": "Deployment Failed",
+                "description": "Branch: `${{ github.ref_name }}`\nWorkflow: [View on GitHub](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n**Action**: App Runner will automatically attempt to roll back to the last known good configuration.",
+                "color": 13458524,
+                "fields": [
+                  { "name": "Service", "value": "`${{ steps.extract-name.outputs.service_name }}`", "inline": true },
+                  { "name": "Image Attempted", "value": "`${{ needs.build.outputs.short_sha }}`", "inline": true },
+                  { "name": "Final Status", "value": "`${{ steps.deploy.outputs.final_status }}`", "inline": true }
+                ]
+              }
+            ]
